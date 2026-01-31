@@ -1,0 +1,31 @@
+# Config with personal settings
+config.json
+
+# Export outputs
+*.pdf
+*.html
+diary-export-*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+
+# Temp files
+.temp_*
+*.tmp
+*.bak
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
