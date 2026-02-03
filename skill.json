@@ -1,7 +1,7 @@
 {
   "name": "agent-chronicle",
-  "version": "0.4.0",
-  "description": "AI-powered diary generation for agents - uses Claude Haiku to create rich, reflective journal entries with Quote Hall of Fame, Curiosity Backlog, Decision Archaeology, and Relationship Evolution",
+  "version": "0.4.1",
+  "description": "AI-powered diary generation for agents - creates rich, reflective journal entries with Quote Hall of Fame, Curiosity Backlog, Decision Archaeology, and Relationship Evolution. Works best with Claude models.",
   "author": "robbyczgw-cla",
   "tags": ["chronicle", "journal", "memory", "self-reflection", "ai-perspective", "quotes", "decisions", "curiosity", "ai-generation"],
   "emoji": "📜",
