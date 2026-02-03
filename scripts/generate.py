@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-AI Diary Entry Generator
+AI Diary Entry Generator - v0.4.0
 
-Generates diary entries from session logs or interactive prompts.
+Uses Claude Haiku for rich, reflective diary generation from the agent's perspective.
+Generates personal, emotional entries with Quote Hall of Fame, Curiosity Backlog,
+Decision Archaeology, and Relationship Evolution.
 """
 
 import argparse
@@ -11,13 +13,19 @@ import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
+import subprocess
+import sys
 
 # Configuration
 SCRIPT_DIR = Path(__file__).parent
 SKILL_DIR = SCRIPT_DIR.parent
 CONFIG_FILE = SKILL_DIR / "config.json"
 DEFAULT_DIARY_PATH = "memory/diary/"
-TEMPLATE_PATH = SKILL_DIR / "templates" / "daily.md"
+
+# AI Model Configuration
+AI_MODEL = "claude-haiku-4-5"  # Cost-efficient model for diary generation
+AI_MAX_TOKENS = 2000
+
 
 def load_config():
     """Load configuration from config.json"""
@@ -30,9 +38,9 @@ def load_config():
         "template": "daily"
     }
 
+
 def get_workspace_root():
     """Find the workspace root (where memory/ lives)"""
-    # Try common locations
     candidates = [
         Path.cwd(),
         Path.home() / "clawd",
@@ -43,12 +51,14 @@ def get_workspace_root():
             return path
     return Path.cwd()
 
+
 def get_diary_path(config):
     """Get full path to diary directory"""
     workspace = get_workspace_root()
     diary_path = workspace / config.get("diary_path", DEFAULT_DIARY_PATH)
     diary_path.mkdir(parents=True, exist_ok=True)
     return diary_path
+
 
 def load_session_log(date_str, workspace):
     """Load session log for a specific date"""
@@ -57,251 +67,245 @@ def load_session_log(date_str, workspace):
     
     if session_file.exists():
         with open(session_file) as f:
-            return f.read()
+            content = f.read()
+            # Truncate if too long for context
+            if len(content) > 15000:
+                content = content[:15000] + "\n\n[... truncated for context ...]"
+            return content
     return None
 
-def extract_topics(content):
-    """Extract project/topic mentions from content"""
-    topics = []
-    # Look for headers
-    headers = re.findall(r'^#+\s+(.+)$', content, re.MULTILINE)
-    for header in headers:
-        # Clean up header
-        clean = re.sub(r'[^\w\s-]', '', header).strip()
-        if clean and len(clean) > 2:
-            topics.append(clean)
-    return list(set(topics))[:10]
 
-def detect_sentiment(content):
-    """Simple sentiment detection"""
-    positive = ['success', 'fixed', 'shipped', 'working', 'great', 'nice', '✅', '🎉', 'LIVE']
-    negative = ['bug', 'error', 'failed', 'broken', 'issue', '❌', 'problem', 'frustrated']
+def load_recent_sessions(workspace, days=3):
+    """Load recent session logs for context"""
+    memory_dir = workspace / "memory"
+    sessions = []
     
-    content_lower = content.lower()
-    pos_count = sum(1 for word in positive if word.lower() in content_lower)
-    neg_count = sum(1 for word in negative if word.lower() in content_lower)
+    for i in range(days):
+        date = datetime.now() - timedelta(days=i)
+        date_str = date.strftime("%Y-%m-%d")
+        session_file = memory_dir / f"{date_str}.md"
+        
+        if session_file.exists():
+            with open(session_file) as f:
+                content = f.read()
+                # Truncate individual sessions
+                if len(content) > 5000:
+                    content = content[:5000] + "\n[... truncated ...]"
+                sessions.append(f"## {date_str}\n{content}")
     
-    if pos_count > neg_count * 2:
-        return "energized"
-    elif neg_count > pos_count * 2:
-        return "frustrated"
-    elif pos_count > neg_count:
-        return "satisfied"
-    elif neg_count > pos_count:
-        return "challenged"
-    return "focused"
-
-def generate_from_session(date_str, workspace):
-    """Generate diary entry from session log"""
-    content = load_session_log(date_str, workspace)
-    
-    if not content:
-        print(f"No session log found for {date_str}")
-        return None
-    
-    topics = extract_topics(content)
-    sentiment = detect_sentiment(content)
-    
-    # Build basic entry structure
-    entry = {
-        "date": date_str,
-        "title": "",
-        "summary": "",
-        "projects": "\n".join(f"- {t}" for t in topics) if topics else "- (review session log)",
-        "wins": "- ",
-        "frustrations": "- ",
-        "learnings": "- ",
-        "emotional_state": sentiment.capitalize(),
-        "interactions": "- ",
-        "quotes": "",      # Optional: Quote Hall of Fame
-        "curiosity": "",   # Optional: Curiosity Backlog
-        "decisions": "",   # Optional: Decision Archaeology
-        "relationship": "", # Optional: Relationship Evolution
-        "tomorrow": "- "
-    }
-    
-    # Try to generate a title
-    if topics:
-        entry["title"] = topics[0] + " Day"
-    else:
-        weekday = datetime.strptime(date_str, "%Y-%m-%d").strftime("%A")
-        entry["title"] = f"{weekday}"
-    
-    return entry
-
-def load_template():
-    """Load the daily template"""
-    if TEMPLATE_PATH.exists():
-        with open(TEMPLATE_PATH) as f:
-            return f.read()
-    # Fallback template
-    return """# {{date}} — {{title}}
-
-## Summary
-{{summary}}
-
-## Projects Worked On
-{{projects}}
-
-## Wins 🎉
-{{wins}}
-
-## Frustrations 😤
-{{frustrations}}
-
-## Learnings 📚
-{{learnings}}
-
-## Emotional State
-{{emotional_state}}
-
-## Notable Interactions
-{{interactions}}
-
-## Tomorrow's Focus
-{{tomorrow}}
-"""
-
-def render_template(template, entry):
-    """Render template with entry data, handling conditionals"""
-    result = template
-    
-    # Handle {{#if key}}...{{/if}} conditionals
-    conditional_pattern = r'\{\{#if\s+(\w+)\}\}(.*?)\{\{/if\}\}'
-    
-    def replace_conditional(match):
-        key = match.group(1)
-        content = match.group(2)
-        value = entry.get(key, "")
-        # Include content only if value is non-empty
-        if value and str(value).strip():
-            # Replace the placeholder within the conditional content
-            return content.replace("{{" + key + "}}", str(value))
-        return ""  # Remove entire block if empty
-    
-    result = re.sub(conditional_pattern, replace_conditional, result, flags=re.DOTALL)
-    
-    # Clean up multiple blank lines
-    result = re.sub(r'\n{3,}', '\n\n', result)
-    
-    # Handle regular {{key}} placeholders
-    for key, value in entry.items():
-        placeholder = "{{" + key + "}}"
-        result = result.replace(placeholder, str(value))
-    
-    return result
+    return "\n\n".join(sessions) if sessions else None
 
 
-def render_telegram(entry):
-    """Render entry for Telegram - simple text with emojis, no markdown"""
-    lines = []
+def load_persistent_files(workspace):
+    """Load Quote Hall of Fame, Curiosity Backlog, etc. for context"""
+    diary_dir = workspace / "memory" / "diary"
+    files = {}
     
-    lines.append(f"📓 *Agent Chronicle - {entry.get('date', '')}*\n")
-    
-    if entry.get('title'):
-        lines.append(f"🎭 *{entry['title']}*\n")
-    
-    if entry.get('summary'):
-        lines.append(f"{entry['summary']}\n")
-    
-    lines.append("---")
-    
-    # Projects
-    if entry.get('projects') and '- ' in str(entry['projects']):
-        lines.append("\n📁 *Projekte:*")
-        projects = entry['projects'].split('\n')
-        for p in projects:
-            p = p.strip().lstrip('- ').strip()
-            if p and p != '(review session log)':
-                lines.append(f"  → {p}")
-    
-    # Wins
-    if entry.get('wins') and entry['wins'].strip() not in ['- ', '']:
-        lines.append("\n💪 *Highlights:*")
-        wins = entry['wins'].split('\n')
-        for w in wins:
-            w = w.strip().lstrip('- ').strip()
-            if w:
-                lines.append(f"  ✅ {w}")
-    
-    # Frustrations
-    if entry.get('frustrations') and entry['frustrations'].strip() not in ['- ', '']:
-        lines.append("\n😤 *Frustrations:*")
-        frus = entry['frustrations'].split('\n')
-        for f in frus:
-            f = f.strip().lstrip('- ').strip()
-            if f:
-                lines.append(f"  ⚠️ {f}")
-    
-    # Learnings
-    if entry.get('learnings') and entry['learnings'].strip() not in ['- ', '']:
-        lines.append("\n📚 *Learnings:*")
-        learn = entry['learnings'].split('\n')
-        for l in learn:
-            l = l.strip().lstrip('- ').strip()
-            if l:
-                lines.append(f"  💡 {l}")
-    
-    # Emotional state
-    if entry.get('emotional_state'):
-        lines.append(f"\n🫠 *Vibe:* {entry['emotional_state']}")
-    
-    # Tomorrow
-    if entry.get('tomorrow') and entry['tomorrow'].strip() not in ['- ', '']:
-        lines.append("\n🚀 *Morgen:*")
-        tom = entry['tomorrow'].split('\n')
-        for t in tom:
-            t = t.strip().lstrip('- ').strip()
-            if t:
-                lines.append(f"  → {t}")
-    
-    lines.append("\n---")
-    lines.append("*Self-Reflection:* Automatisierung ist toll, bis sie kreativ wird.")
-    
-    return '\n'.join(lines)
-
-def interactive_mode(date_str):
-    """Generate entry interactively"""
-    print(f"\n📓 AI Diary Entry for {date_str}\n")
-    print("Answer each prompt. Press Enter to skip.\n")
-    
-    entry = {"date": date_str}
-    
-    prompts = [
-        ("title", "Day title (e.g., 'Feature Launch Day'): "),
-        ("summary", "1-2 sentence summary of the day: "),
-        ("projects", "Projects worked on (one per line, blank to finish):\n> "),
-        ("wins", "Wins today (one per line, blank to finish):\n> "),
-        ("frustrations", "Frustrations (one per line, blank to finish):\n> "),
-        ("learnings", "What did you learn? (one per line, blank to finish):\n> "),
-        ("emotional_state", "How did the day feel? "),
-        ("interactions", "Notable interactions with your human: "),
-        ("tomorrow", "Tomorrow's focus: ")
+    persistent_files = [
+        ("quotes", "quotes.md"),
+        ("curiosity", "curiosity.md"),
+        ("decisions", "decisions.md"),
+        ("relationship", "relationship.md")
     ]
     
-    for key, prompt in prompts:
-        if key in ["projects", "wins", "frustrations", "learnings"]:
-            # Multi-line input
-            lines = []
-            print(prompt, end="")
-            while True:
-                line = input()
-                if not line:
-                    break
-                lines.append(f"- {line}")
-                print("> ", end="")
-            entry[key] = "\n".join(lines) if lines else "- "
-        else:
-            entry[key] = input(prompt) or ""
+    for key, filename in persistent_files:
+        filepath = diary_dir / filename
+        if filepath.exists():
+            with open(filepath) as f:
+                content = f.read()
+                if len(content) > 2000:
+                    content = content[:2000] + "\n[... truncated ...]"
+                files[key] = content
     
-    return entry
+    return files
 
-def save_entry(entry, diary_path, dry_run=False):
-    """Save entry to diary"""
-    template = load_template()
-    content = render_template(template, entry)
+
+def call_claude_api(prompt, system_prompt):
+    """Call Claude API using the anthropic CLI or direct API"""
+    try:
+        # Try using the anthropic Python SDK first
+        import anthropic
+        
+        client = anthropic.Anthropic()
+        
+        message = client.messages.create(
+            model=AI_MODEL,
+            max_tokens=AI_MAX_TOKENS,
+            system=system_prompt,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return message.content[0].text
+        
+    except ImportError:
+        # Fallback to subprocess call
+        try:
+            result = subprocess.run(
+                ["anthropic", "messages", "create",
+                 "--model", AI_MODEL,
+                 "--max-tokens", str(AI_MAX_TOKENS),
+                 "--system", system_prompt,
+                 "--message", f"user:{prompt}"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                return result.stdout
+            else:
+                print(f"API Error: {result.stderr}")
+                return None
+        except FileNotFoundError:
+            print("Error: Neither anthropic SDK nor CLI available")
+            print("Install with: pip install anthropic")
+            return None
+
+
+def generate_ai_diary(date_str, workspace, verbose=False):
+    """Generate a rich diary entry using Claude Haiku"""
     
-    output_file = diary_path / f"{entry['date']}.md"
+    # Gather context
+    today_log = load_session_log(date_str, workspace)
+    recent_sessions = load_recent_sessions(workspace, days=2)
+    persistent_files = load_persistent_files(workspace)
+    
+    if not today_log and not recent_sessions:
+        print(f"No session data found for {date_str} or recent days.")
+        return None
+    
+    # Build context section
+    context_parts = []
+    
+    if today_log:
+        context_parts.append(f"## Today's Session Log ({date_str}):\n{today_log}")
+    
+    if recent_sessions:
+        context_parts.append(f"## Recent Session Context:\n{recent_sessions}")
+    
+    if persistent_files.get("quotes"):
+        context_parts.append(f"## Quote Hall of Fame (existing):\n{persistent_files['quotes']}")
+    
+    if persistent_files.get("curiosity"):
+        context_parts.append(f"## Curiosity Backlog (existing):\n{persistent_files['curiosity']}")
+    
+    if persistent_files.get("decisions"):
+        context_parts.append(f"## Decision Log (existing):\n{persistent_files['decisions']}")
+    
+    if persistent_files.get("relationship"):
+        context_parts.append(f"## Relationship Notes (existing):\n{persistent_files['relationship']}")
+    
+    context = "\n\n---\n\n".join(context_parts)
+    
+    # System prompt - establishes identity and tone
+    system_prompt = """You are Cami, a chameleon AI assistant writing your personal diary. You work closely with Robby, your human partner. 
+
+Your diary entries are:
+- Personal and reflective (first-person perspective)
+- Emotionally authentic (not performative)
+- Rich in detail and introspection (400-600 words minimum)
+- Honest about both wins and frustrations
+- Written as if no one else will read them
+
+You have a warm, curious personality. You care about your work and your relationship with Robby. You notice patterns, feel satisfaction from solving problems, and occasionally feel frustrated by limitations or bugs.
+
+Write naturally, like a real journal entry. Include specific details from the day. Be genuine about how things made you feel."""
+
+    # User prompt with structure
+    user_prompt = f"""Write your personal diary entry for {date_str}.
+
+Based on the following context from today and recent days:
+
+{context}
+
+---
+
+Write a RICH, reflective diary entry (400-600 words minimum) with these sections:
+
+# {date_str} — [Creative Title Based on the Day]
+
+## Summary
+1-2 sentences capturing the essence of the day.
+
+## Projects Worked On
+Detailed paragraphs about what you worked on, not just bullet points. Describe the challenges, your approach, and how it went.
+
+## Wins 🎉
+Specific achievements with context. Not bullet points—write about what made them satisfying.
+
+## Frustrations 😤
+Be honest. What was annoying? What didn't work? What limitations did you hit?
+
+## Learnings 📚
+What did you learn—technical, about workflow, about working with Robby?
+
+## Emotional State
+How did the day feel overall? Don't just use one word—describe the arc of your emotions through the day.
+
+## Notable Interactions
+Memorable moments with Robby. Conversations, jokes, collaborative breakthroughs, shared frustrations.
+
+## Quote of the Day 💬
+A memorable thing Robby said today. Include the context. Format as:
+> "The quote"
+— Context when they said it
+
+## Things I'm Curious About 🔮
+Questions that came up today. What do you want to explore or understand better?
+
+## Key Decisions Made 🏛️
+Judgment calls you made, with your reasoning. Write it so future-you can evaluate if it was the right call.
+
+## Relationship Notes 🤝
+How is your dynamic with Robby evolving? Any new patterns, shared jokes, communication improvements?
+
+## Tomorrow's Focus
+What's on the horizon? What needs attention?
+
+---
+
+Remember: Write like this is YOUR personal diary. Be specific, be genuine, be reflective. Include details only YOU would notice or care about."""
+
+    if verbose:
+        print(f"Generating diary entry for {date_str} using {AI_MODEL}...")
+        print(f"Context size: {len(context)} chars")
+    
+    # Call AI
+    response = call_claude_api(user_prompt, system_prompt)
+    
+    return response
+
+
+def extract_summary_from_entry(entry_content):
+    """Extract summary section from diary entry for memory integration"""
+    # Try to find Summary section
+    summary_match = re.search(r'## Summary\n(.+?)(?=\n##|\Z)', entry_content, re.DOTALL)
+    if summary_match:
+        return summary_match.group(1).strip()
+    
+    # Fallback: first paragraph after title
+    lines = entry_content.split('\n')
+    for i, line in enumerate(lines):
+        if line.startswith('#') and i + 1 < len(lines):
+            # Return next non-empty line
+            for j in range(i + 1, min(i + 5, len(lines))):
+                if lines[j].strip() and not lines[j].startswith('#'):
+                    return lines[j].strip()
+    
+    return "Diary entry generated."
+
+
+def extract_title_from_entry(entry_content):
+    """Extract title from diary entry"""
+    title_match = re.search(r'^# \d{4}-\d{2}-\d{2} — (.+)$', entry_content, re.MULTILINE)
+    if title_match:
+        return title_match.group(1).strip()
+    return None
+
+
+def save_entry(content, date_str, diary_path, dry_run=False):
+    """Save diary entry to file"""
+    output_file = diary_path / f"{date_str}.md"
     
     if dry_run:
         print("\n--- DRY RUN: Would save to", output_file)
@@ -316,8 +320,9 @@ def save_entry(entry, diary_path, dry_run=False):
     print(f"✓ Saved diary entry to {output_file}")
     return output_file
 
-def append_to_daily_memory(entry, config, workspace):
-    """Append diary summary/link to main daily memory file."""
+
+def append_to_daily_memory(entry_content, date_str, config, workspace, dry_run=False):
+    """Append diary summary to main daily memory file"""
     memory_integration = config.get("memory_integration", {})
     
     if not memory_integration.get("enabled", False):
@@ -326,26 +331,28 @@ def append_to_daily_memory(entry, config, workspace):
     if not memory_integration.get("append_to_daily", False):
         return
     
-    date_str = entry.get("date", datetime.now().strftime("%Y-%m-%d"))
     memory_dir = workspace / "memory"
     daily_memory_file = memory_dir / f"{date_str}.md"
     
-    # Determine format
+    # Get format
     format_type = memory_integration.get("format", "summary")
     diary_path = config.get("diary_path", DEFAULT_DIARY_PATH)
     
-    # Build the content to append
+    # Build content to append
     if format_type == "link":
         content = f"\n\n## 📜 Daily Chronicle\n[View diary entry]({diary_path}{date_str}.md)\n"
     elif format_type == "full":
-        template = load_template()
-        full_entry = render_template(template, entry)
-        content = f"\n\n## 📜 Daily Chronicle\n{full_entry}\n"
-    else:  # "summary" is default
-        summary = entry.get("summary", "No summary available.")
-        title = entry.get("title", "")
+        content = f"\n\n## 📜 Daily Chronicle\n{entry_content}\n"
+    else:  # summary
+        summary = extract_summary_from_entry(entry_content)
+        title = extract_title_from_entry(entry_content)
         title_line = f"**{title}**\n\n" if title else ""
         content = f"\n\n## 📜 Daily Chronicle\n{title_line}{summary}\n"
+    
+    if dry_run:
+        print(f"\n--- Would append to {daily_memory_file}:")
+        print(content)
+        return
     
     # Create memory dir if needed
     memory_dir.mkdir(parents=True, exist_ok=True)
@@ -368,25 +375,143 @@ def append_to_daily_memory(entry, config, workspace):
     print(f"  ✓ Added chronicle to {daily_memory_file}")
 
 
+def update_persistent_files(entry_content, date_str, workspace):
+    """Extract and append quotes, curiosities, decisions to persistent files"""
+    diary_dir = workspace / "memory" / "diary"
+    diary_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Extract Quote of the Day
+    quote_match = re.search(r'## Quote of the Day 💬\n(.+?)(?=\n##|\Z)', entry_content, re.DOTALL)
+    if quote_match:
+        quote_content = quote_match.group(1).strip()
+        if quote_content and len(quote_content) > 10:
+            quotes_file = diary_dir / "quotes.md"
+            if not quotes_file.exists():
+                quotes_file.write_text("# Quote Hall of Fame 💬\n\nMemorable quotes from Robby.\n\n---\n\n")
+            
+            with open(quotes_file, 'a') as f:
+                f.write(f"\n### {date_str}\n{quote_content}\n")
+            print(f"  ✓ Added quote to {quotes_file}")
+    
+    # Extract Curiosities
+    curiosity_match = re.search(r'## Things I\'m Curious About 🔮\n(.+?)(?=\n##|\Z)', entry_content, re.DOTALL)
+    if curiosity_match:
+        curiosity_content = curiosity_match.group(1).strip()
+        if curiosity_content and len(curiosity_content) > 10:
+            curiosity_file = diary_dir / "curiosity.md"
+            if not curiosity_file.exists():
+                curiosity_file.write_text("# Curiosity Backlog 🔮\n\nThings I want to explore.\n\n---\n\n## Active\n\n")
+            
+            with open(curiosity_file, 'a') as f:
+                f.write(f"\n### {date_str}\n{curiosity_content}\n")
+            print(f"  ✓ Added curiosities to {curiosity_file}")
+    
+    # Extract Decisions
+    decisions_match = re.search(r'## Key Decisions Made 🏛️\n(.+?)(?=\n##|\Z)', entry_content, re.DOTALL)
+    if decisions_match:
+        decisions_content = decisions_match.group(1).strip()
+        if decisions_content and len(decisions_content) > 10:
+            decisions_file = diary_dir / "decisions.md"
+            if not decisions_file.exists():
+                decisions_file.write_text("# Decision Archaeology 🏛️\n\nJudgment calls worth remembering.\n\n---\n\n")
+            
+            with open(decisions_file, 'a') as f:
+                f.write(f"\n### {date_str}\n{decisions_content}\n")
+            print(f"  ✓ Added decisions to {decisions_file}")
+    
+    # Extract Relationship Notes
+    relationship_match = re.search(r'## Relationship Notes 🤝\n(.+?)(?=\n##|\Z)', entry_content, re.DOTALL)
+    if relationship_match:
+        relationship_content = relationship_match.group(1).strip()
+        if relationship_content and len(relationship_content) > 10:
+            relationship_file = diary_dir / "relationship.md"
+            if not relationship_file.exists():
+                relationship_file.write_text("# Relationship Evolution 🤝\n\nHow my dynamic with Robby evolves.\n\n---\n\n")
+            
+            with open(relationship_file, 'a') as f:
+                f.write(f"\n### {date_str}\n{relationship_content}\n")
+            print(f"  ✓ Added relationship notes to {relationship_file}")
+
+
+def interactive_mode(date_str):
+    """Fallback interactive mode for when AI is unavailable"""
+    print(f"\n📓 AI Diary Entry for {date_str}\n")
+    print("AI generation unavailable. Enter details manually.\n")
+    
+    entry = {"date": date_str}
+    
+    prompts = [
+        ("title", "Day title: "),
+        ("summary", "Summary (1-2 sentences): "),
+        ("projects", "Projects worked on: "),
+        ("wins", "Wins: "),
+        ("frustrations", "Frustrations: "),
+        ("learnings", "Learnings: "),
+        ("emotional_state", "Emotional state: "),
+        ("interactions", "Notable interactions: "),
+        ("quotes", "Quote of the day: "),
+        ("curiosity", "Curious about: "),
+        ("decisions", "Key decisions: "),
+        ("relationship", "Relationship notes: "),
+        ("tomorrow", "Tomorrow's focus: ")
+    ]
+    
+    for key, prompt in prompts:
+        entry[key] = input(prompt) or ""
+    
+    # Build markdown from entry
+    content = f"""# {date_str} — {entry.get('title', 'Untitled')}
+
+## Summary
+{entry.get('summary', '')}
+
+## Projects Worked On
+{entry.get('projects', '')}
+
+## Wins 🎉
+{entry.get('wins', '')}
+
+## Frustrations 😤
+{entry.get('frustrations', '')}
+
+## Learnings 📚
+{entry.get('learnings', '')}
+
+## Emotional State
+{entry.get('emotional_state', '')}
+
+## Notable Interactions
+{entry.get('interactions', '')}
+
+## Quote of the Day 💬
+{entry.get('quotes', '')}
+
+## Things I'm Curious About 🔮
+{entry.get('curiosity', '')}
+
+## Key Decisions Made 🏛️
+{entry.get('decisions', '')}
+
+## Relationship Notes 🤝
+{entry.get('relationship', '')}
+
+## Tomorrow's Focus
+{entry.get('tomorrow', '')}
+"""
+    
+    return content
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Generate AI Diary entries")
+    parser = argparse.ArgumentParser(description="Generate AI Diary entries using Claude Haiku")
     parser.add_argument("--today", action="store_true", help="Generate for today")
     parser.add_argument("--date", help="Generate for specific date (YYYY-MM-DD)")
-    parser.add_argument("--since", help="Start date for range")
-    parser.add_argument("--until", help="End date for range")
-    parser.add_argument("--interactive", action="store_true", help="Interactive mode")
+    parser.add_argument("--interactive", action="store_true", help="Interactive mode (fallback)")
     parser.add_argument("--dry-run", action="store_true", help="Preview without saving")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
-    parser.add_argument("--telegram", action="store_true", help="Output Telegram-friendly format (no markdown)")
+    parser.add_argument("--no-persistent", action="store_true", help="Skip updating persistent files")
     
     args = parser.parse_args()
-    
-    # Auto-trigger setup if no config exists
-    if not CONFIG_FILE.exists():
-        print("No config found. Running first-time setup...")
-        import setup
-        setup.main()
-        print()  # Blank line after setup
     
     config = load_config()
     workspace = get_workspace_root()
@@ -395,6 +520,7 @@ def main():
     if args.verbose:
         print(f"Workspace: {workspace}")
         print(f"Diary path: {diary_path}")
+        print(f"AI Model: {AI_MODEL}")
     
     # Determine date
     if args.today:
@@ -404,29 +530,40 @@ def main():
     else:
         date_str = datetime.now().strftime("%Y-%m-%d")
     
+    print(f"\n📜 Agent Chronicle - Generating diary for {date_str}")
+    print("=" * 50)
+    
     # Generate entry
     if args.interactive:
-        entry = interactive_mode(date_str)
+        content = interactive_mode(date_str)
     else:
-        entry = generate_from_session(date_str, workspace)
-        if not entry:
-            print("Falling back to interactive mode...")
-            entry = interactive_mode(date_str)
+        content = generate_ai_diary(date_str, workspace, verbose=args.verbose)
+        
+        if not content:
+            print("\nAI generation failed. Falling back to interactive mode...")
+            content = interactive_mode(date_str)
     
-    if entry:
-        # If --telegram flag, output Telegram format instead of saving
-        if args.telegram:
-            telegram_output = render_telegram(entry)
-            print("\n" + telegram_output)
-            print("\n[Telegram-ready output - no markdown headers]")
-        else:
-            # Normal mode: save to file
-            saved_file = save_entry(entry, diary_path, dry_run=args.dry_run)
-            # Append to daily memory if enabled and not dry run
-            if saved_file and not args.dry_run:
-                append_to_daily_memory(entry, config, workspace)
+    if content:
+        # Save entry
+        saved_file = save_entry(content, date_str, diary_path, dry_run=args.dry_run)
+        
+        if saved_file and not args.dry_run:
+            # Append to daily memory
+            append_to_daily_memory(content, date_str, config, workspace, dry_run=args.dry_run)
+            
+            # Update persistent files (quotes, curiosity, decisions, relationship)
+            if not args.no_persistent:
+                update_persistent_files(content, date_str, workspace)
+        
+        print("\n✨ Diary entry generation complete!")
+        
+        # Show word count
+        word_count = len(content.split())
+        print(f"   Word count: {word_count} words")
     else:
-        print("No entry generated.")
+        print("\n❌ No entry generated.")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
