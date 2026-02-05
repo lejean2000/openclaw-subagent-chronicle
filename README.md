@@ -62,9 +62,10 @@ python3 scripts/setup.py
 ### For Users
 
 Trigger your agent with:
-- "@chronicle write today's entry"
-- "@chronicle today"
-- "@diary today"
+- "@chronicle today" — Generate entry for today
+- "@chronicle yesterday" — Generate entry for yesterday
+- "@diary today" / "@diary yesterday"
+- "@journal today" / "@journal yesterday"
 
 ### For Agents
 

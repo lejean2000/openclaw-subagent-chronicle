@@ -37,10 +37,21 @@ This diary is for us—a space to:
 ## Triggers
 
 The skill activates on:
-- "@chronicle write today's entry"
-- "@chronicle today"
-- "@diary today"
-- "@journal today"
+- "@chronicle today" — Generate entry for today
+- "@chronicle yesterday" — Generate entry for yesterday
+- "@diary today" / "@diary yesterday"
+- "@journal today" / "@journal yesterday"
+
+### What Happens When Triggered
+
+When you say "@chronicle today", your agent will:
+
+1. **Collect context** — Run `scripts/collect.py --today` to gather session logs and persistent files
+2. **Spawn subagent** — Task a subagent with "Write a diary entry for today based on this context..."
+3. **Receive entry** — The subagent returns a complete markdown diary entry
+4. **Save** — Run `scripts/save.py --today` to write the entry and update persistent files
+
+The entire flow happens automatically when the trigger is detected.
 
 ## How It Works
 
@@ -179,6 +190,9 @@ Collect context for diary generation.
 # Collect for today
 python3 scripts/collect.py --today
 
+# Collect for yesterday
+python3 scripts/collect.py --yesterday
+
 # Collect for specific date
 python3 scripts/collect.py --date 2026-02-05
 
@@ -197,8 +211,11 @@ Outputs formatted markdown with:
 Save a diary entry and update persistent files.
 
 ```bash
-# Read from stdin
+# Read from stdin for today
 echo "$entry_content" | python3 scripts/save.py --today
+
+# Read from stdin for yesterday
+echo "$entry_content" | python3 scripts/save.py --yesterday
 
 # Read from file
 python3 scripts/save.py --today --file entry.md

@@ -207,7 +207,9 @@ def append_to_daily_memory(entry_content, date_str, config, workspace):
 
 def main():
     parser = argparse.ArgumentParser(description="Save a diary entry")
-    parser.add_argument("--date", help="Date for entry (YYYY-MM-DD, default: today)")
+    parser.add_argument("--today", action="store_true", help="Use today's date")
+    parser.add_argument("--yesterday", action="store_true", help="Use yesterday's date")
+    parser.add_argument("--date", help="Date for entry (YYYY-MM-DD)")
     parser.add_argument("--file", "-f", help="Read entry from file (default: stdin)")
     parser.add_argument("--no-persistent", action="store_true", help="Skip updating persistent files")
     parser.add_argument("--dry-run", action="store_true", help="Preview without saving")
@@ -226,7 +228,11 @@ def main():
         sys.exit(1)
     
     # Determine date
-    if args.date:
+    if args.today:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+    elif args.yesterday:
+        date_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    elif args.date:
         date_str = args.date
     else:
         # Try to extract from entry title

@@ -163,6 +163,7 @@ def collect_context(date_str, workspace, config):
 def main():
     parser = argparse.ArgumentParser(description="Collect context for diary generation")
     parser.add_argument("--today", action="store_true", help="Collect for today")
+    parser.add_argument("--yesterday", action="store_true", help="Collect for yesterday")
     parser.add_argument("--date", help="Collect for specific date (YYYY-MM-DD)")
     parser.add_argument("--output", "-o", help="Output file (default: stdout)")
     
@@ -174,6 +175,8 @@ def main():
     # Determine date
     if args.today:
         date_str = datetime.now().strftime("%Y-%m-%d")
+    elif args.yesterday:
+        date_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     elif args.date:
         date_str = args.date
     else:
