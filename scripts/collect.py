@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Subagent Chronicle - Context Collector v1.0.0
+Subagent Chronicle - Context Collector v1.0.1
 
 Collects session logs and persistent files for diary generation.
 Outputs formatted context to stdout for consumption by the main agent.
@@ -50,41 +50,150 @@ def get_workspace_root():
     return Path.cwd()
 
 
+def get_agents_dir(workspace):
+    """Find the agents directory containing session logs"""
+    # Try common locations
+    candidates = [
+        workspace / ".openclaw" / "agents" / "main" / "sessions",
+        workspace / "agents" / "main" / "sessions",
+        Path.home() / ".openclaw" / "agents" / "main" / "sessions",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
+
+
 def get_diary_path(config, workspace):
     """Get full path to diary directory"""
     return workspace / config.get("diary_path", DEFAULT_DIARY_PATH)
 
 
-def load_session_log(date_str, workspace, max_chars=15000):
-    """Load session log for a specific date"""
-    memory_dir = workspace / "memory"
-    session_file = memory_dir / f"{date_str}.md"
+def parse_jsonl_session(session_file, max_chars=15000):
+    """Parse a JSONL session file and extract human-readable content"""
+    content_parts = []
     
-    if session_file.exists():
+    try:
         with open(session_file) as f:
-            content = f.read()
-            if len(content) > max_chars:
-                content = content[:max_chars] + "\n\n[... truncated for context ...]"
-            return content
-    return None
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    
+                    # Handle different entry types
+                    entry_type = entry.get("type")
+                    
+                    if entry_type == "message":
+                        msg = entry.get("message", {})
+                        role = msg.get("role", "")
+                        content = msg.get("content", "")
+                        
+                        # Extract user messages
+                        if role == "user":
+                            if isinstance(content, list):
+                                for item in content:
+                                    if isinstance(item, dict) and item.get("type") == "text":
+                                        text = item.get("text", "")
+                                        # Skip system/greeting messages
+                                        if not text.startswith("A new session was started"):
+                                            content_parts.append(f"User: {text}")
+                            elif isinstance(content, str):
+                                if not content.startswith("A new session was started"):
+                                    content_parts.append(f"User: {content}")
+                        
+                        # Extract assistant messages
+                        elif role == "assistant":
+                            if isinstance(content, list):
+                                for item in content:
+                                    if isinstance(item, dict) and item.get("type") == "text":
+                                        content_parts.append(f"Assistant: {item.get('text', '')}")
+                            elif isinstance(content, str):
+                                content_parts.append(f"Assistant: {content}")
+                            
+                            # Handle tool calls
+                            if "tool_calls" in msg:
+                                for tc in msg.get("tool_calls", []):
+                                    fn = tc.get("function", {})
+                                    content_parts.append(f"[Tool: {fn.get('name', 'unknown')}] {fn.get('arguments', '')}")
+                    
+                    elif entry_type == "tool_result":
+                        result = entry.get("result", {})
+                        result_text = result.get("text", "") if isinstance(result, dict) else str(result)
+                        if result_text:
+                            content_parts.append(f"[Tool Result]: {result_text[:500]}")
+                    
+                    elif entry_type == "tool_error":
+                        error = entry.get("error", "")
+                        if error:
+                            content_parts.append(f"[Tool Error]: {error}")
+                            
+                except json.JSONDecodeError:
+                    continue
+                
+                # Check if we've hit the limit
+                current_len = sum(len(p) for p in content_parts)
+                if current_len > max_chars:
+                    content_parts.append("\n[... truncated for context ...]")
+                    break
+    except Exception as e:
+        return f"[Error reading session: {e}]"
+    
+    result = "\n\n".join(content_parts)
+    return result if result else "[No content extracted]"
+
+
+def load_session_log(date_str, workspace, max_chars=15000):
+    """Load session logs for a specific date from agents/main/sessions"""
+    agents_dir = get_agents_dir(workspace)
+    
+    if not agents_dir:
+        return None
+    
+    # Parse target date
+    target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    
+    # Find all session files modified on the target date
+    sessions = []
+    for session_file in agents_dir.glob("*.jsonl"):
+        # Skip lock files
+        if session_file.suffix == ".lock" or str(session_file).endswith(".lock"):
+            continue
+        
+        # Get file modification time
+        mtime = datetime.fromtimestamp(session_file.stat().st_mtime)
+        if mtime.date() == target_date:
+            content = parse_jsonl_session(session_file, max_chars=max_chars // 3)
+            if content:
+                sessions.append(f"### Session: {session_file.stem}\n{content}")
+    
+    if not sessions:
+        return None
+    
+    return "\n\n".join(sessions)
 
 
 def load_recent_sessions(workspace, days=3, max_per_session=5000):
     """Load recent session logs for context"""
-    memory_dir = workspace / "memory"
-    sessions = []
+    agents_dir = get_agents_dir(workspace)
     
-    for i in range(days):
-        date = datetime.now() - timedelta(days=i)
-        date_str = date.strftime("%Y-%m-%d")
-        session_file = memory_dir / f"{date_str}.md"
+    if not agents_dir:
+        return None
+    
+    sessions = []
+    cutoff = datetime.now() - timedelta(days=days)
+    
+    for session_file in agents_dir.glob("*.jsonl"):
+        if str(session_file).endswith(".lock"):
+            continue
         
-        if session_file.exists():
-            with open(session_file) as f:
-                content = f.read()
-                if len(content) > max_per_session:
-                    content = content[:max_per_session] + "\n[... truncated ...]"
-                sessions.append(f"## Session: {date_str}\n{content}")
+        mtime = datetime.fromtimestamp(session_file.stat().st_mtime)
+        if mtime >= cutoff:
+            content = parse_jsonl_session(session_file, max_chars=max_per_session)
+            if content:
+                date_str = mtime.strftime("%Y-%m-%d")
+                sessions.append(f"## Session: {session_file.stem} ({date_str})\n{content}")
     
     return "\n\n".join(sessions) if sessions else None
 
@@ -128,8 +237,12 @@ def collect_context(date_str, workspace, config):
     output_parts.append("")
     
     if today_log:
-        output_parts.append(f"## Today's Session Log ({date_str})")
+        output_parts.append(f"## Today's Sessions ({date_str})")
         output_parts.append(today_log)
+        output_parts.append("")
+    else:
+        output_parts.append(f"## Today's Sessions ({date_str})")
+        output_parts.append("*No sessions recorded for this date*")
         output_parts.append("")
     
     if recent_sessions:
