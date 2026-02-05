@@ -1,6 +1,6 @@
 ---
 name: subagent-chronicle
-version: 1.0.0
+version: 1.0.1
 description: OpenClaw-native diary generation using subagents. Creates reflective journal entries from the agent's perspective with Quote Hall of Fame, Curiosity Backlog, Decision Archaeology, and Relationship Evolution.
 metadata: {"clawdbot":{"requires":{"bins":["python3"]}}}
 ---
@@ -46,10 +46,13 @@ The skill activates on:
 
 When you say "@chronicle today", your agent will:
 
-1. **Collect context** — Run `scripts/collect.py --today` to gather session logs and persistent files
-2. **Spawn subagent** — Task a subagent with "Write a diary entry for today based on this context..."
-3. **Receive entry** — The subagent returns a complete markdown diary entry
-4. **Save** — Run `scripts/save.py --today` to write the entry and update persistent files
+1. **Archive existing entry** — Run `scripts/archive.py --today` to move any existing entry to `memory/diary/archive/`. This prevents the subagent from being contaminated by a previous (possibly flawed) version when regenerating an entry.
+
+2. **Collect context** — Run `scripts/collect.py --today` to gather session logs and persistent files
+
+3. **Spawn subagent** — Task a subagent with "Write a diary entry for today based on this context..." The subagent is fully independent — it reads files, writes the entry directly, and works in the background.
+
+4. **Continue conversation** — No need to wait or babysit. The subagent handles everything autonomously.
 
 The entire flow happens automatically when the trigger is detected.
 
@@ -57,17 +60,22 @@ The entire flow happens automatically when the trigger is detected.
 
 When triggered, your agent will:
 
-1. **Collect** context via `scripts/collect.py --today`
+1. **Archive** existing entry via `scripts/archive.py --today`
+   - Moves any existing entry to `memory/diary/archive/YYYY-MM-DD-HHMMSS.md`
+   - Prevents subagent from reading old versions during regeneration
+   - Safe to run even if no entry exists (idempotent)
+
+2. **Collect** context via `scripts/collect.py --today`
    - Gathers session logs
    - Loads persistent files (quotes, curiosity, decisions, relationship)
    - Outputs formatted context
 
-2. **Spawn** a subagent with the diary generation task
-   - Subagent receives context and writes the entry
+3. **Spawn** a subagent with the diary generation task
+   - Subagent receives context and writes the entry **directly**
+   - Fully independent — reads SOUL.md, USER.md, and persistent files
    - Uses your configured OpenClaw model (no hardcoding)
-   - Returns the complete diary entry
-
-3. **Save** via `scripts/save.py`
+   - Updates persistent files (quotes, curiosity, decisions, relationship)
+   - Works in background, no babysitting required
    - Writes entry to `memory/diary/YYYY-MM-DD.md`
    - Extracts quotes → `memory/diary/quotes.md`
    - Extracts curiosities → `memory/diary/curiosity.md`
@@ -96,7 +104,10 @@ This will:
 When you say "@chronicle today", your agent should:
 
 ```bash
-# 1. Collect context
+# 1. Archive existing entry (prevents contamination during regeneration)
+python3 scripts/archive.py --today
+
+# 2. Collect context
 context=$(python3 scripts/collect.py --today)
 
 # 2. Spawn subagent for generation
@@ -260,19 +271,39 @@ python3 scripts/export.py --format html --all
 python3 scripts/export.py --format pdf --month 2026-01
 ```
 
+### archive.py
+
+Archive existing diary entries before regeneration. Prevents subagent from being contaminated by old/flawed versions.
+
+```bash
+# Archive today's entry (if it exists)
+python3 scripts/archive.py --today
+
+# Archive yesterday's entry
+python3 scripts/archive.py --yesterday
+
+# Archive specific date
+python3 scripts/archive.py --date 2026-02-05
+```
+
+Archived entries are moved to `memory/diary/archive/YYYY-MM-DD-HHMMSS.md`. Safe to run even if no entry exists.
+
 ## Storage Structure
 
 ```
 memory/
 ├── diary/
-│   ├── 2026-01-29.md      # Daily entry
-│   ├── 2026-01-30.md      # Daily entry
-│   ├── 2026-01-31.md      # Daily entry
-│   ├── quotes.md          # Quote Hall of Fame
-│   ├── curiosity.md       # Curiosity Backlog
-│   ├── decisions.md       # Decision Archaeology
-│   └── relationship.md    # Relationship Evolution
-└── 2026-01-31.md          # Daily memory log (with 📜 Daily Chronicle section)
+│   ├── 2026-01-29.md              # Daily entry
+│   ├── 2026-01-30.md              # Daily entry
+│   ├── 2026-01-31.md              # Daily entry
+│   ├── archive/                   # Archived entries (before regeneration)
+│   │   ├── 2026-01-31-143022.md   # Timestamped archive
+│   │   └── 2026-02-05-091530.md
+│   ├── quotes.md                  # Quote Hall of Fame
+│   ├── curiosity.md               # Curiosity Backlog
+│   ├── decisions.md               # Decision Archaeology
+│   └── relationship.md            # Relationship Evolution
+└── 2026-01-31.md                  # Daily memory log (with 📜 Daily Chronicle section)
 ```
 
 ## Configuration
@@ -417,6 +448,12 @@ be reflective. Include details only YOU would notice or care about.
 ```
 
 ## Changelog
+
+### v1.0.1 (Archive Before Regeneration)
+- **Added `archive.py`**: Archives existing entries before regeneration
+- **Prevents memory contamination**: Old versions are moved to `memory/diary/archive/` before new generation
+- **Updated workflow**: Archive → Collect → Spawn → Save
+- **Safer regeneration**: Subagent won't read flawed previous versions when regenerating
 
 ### v1.0.0 (Subagent Chronicle)
 - **Complete rewrite**: Replaced raw HTTP API calls with subagent spawning
