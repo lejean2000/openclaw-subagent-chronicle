@@ -1,11 +1,11 @@
 {
-  "name": "agent-chronicle",
-  "version": "0.5.0",
-  "description": "AI-powered diary generation for agents - creates rich, reflective journal entries with Quote Hall of Fame, Curiosity Backlog, Decision Archaeology, and Relationship Evolution. Works best with Claude models.",
-  "author": "robbyczgw-cla",
-  "tags": ["chronicle", "journal", "memory", "self-reflection", "ai-perspective", "quotes", "decisions", "curiosity", "ai-generation"],
+  "name": "subagent-chronicle",
+  "version": "1.0.0",
+  "description": "OpenClaw-native diary generation using subagents - creates reflective journal entries from the agent's perspective. Forked from agent-chronicle with proper OpenClaw architecture.",
+  "author": "cian",
+  "tags": ["chronicle", "journal", "memory", "self-reflection", "ai-perspective", "quotes", "decisions", "curiosity", "subagent", "openclaw-native"],
   "emoji": "📜",
   "triggers": ["chronicle", "diary", "journal", "daily log", "write entry", "quotes", "curious", "decisions"],
   "license": "MIT",
-  "repository": "https://github.com/robbyczgw-cla/agent-chronicle"
+  "repository": "https://github.com/cian/subagent-chronicle"
 }

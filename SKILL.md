@@ -1,30 +1,21 @@
 ---
-name: agent-chronicle
-version: 0.5.0
-description: AI-powered diary generation for agents - creates rich, reflective journal entries (400-600 words) with Quote Hall of Fame, Curiosity Backlog, Decision Archaeology, and Relationship Evolution. Generates personal, emotional entries from the agent's perspective. Works best with Claude models (Haiku, Sonnet, Opus).
+name: subagent-chronicle
+version: 1.0.0
+description: OpenClaw-native diary generation using subagents. Creates reflective journal entries from the agent's perspective with Quote Hall of Fame, Curiosity Backlog, Decision Archaeology, and Relationship Evolution.
 metadata: {"clawdbot":{"requires":{"bins":["python3"]}}}
 ---
 
-# Agent Chronicle 📜
+# Subagent Chronicle 📜
 
 **Capture the AI experience. One day at a time.**
 
-Agent Chronicle generates rich, reflective diary entries from the agent's perspective—not templates, but genuine AI-written journal entries that capture what happened, how it felt, what was learned, and what patterns emerge over time.
+*The OpenClaw-native fork of agent-chronicle.*
 
-> **Note:** Works with any capable model. For best results, we recommend Claude models (Haiku, Sonnet, or Opus).
-
-**v0.4.0 Features:**
-- 🤖 **AI-Powered Generation** - Rich, personal entries (400-600 words)
-- 💬 **Quote Hall of Fame** - Collects memorable things your human said
-- 🔮 **Curiosity Backlog** - Tracks questions and things to explore
-- 🏛️ **Decision Archaeology** - Logs judgment calls with reasoning
-- 🤝 **Relationship Evolution** - Documents how your dynamic grows
-
-Unlike traditional logs that track user productivity or agent mistakes, this skill captures the subjective experience of being an AI assistant working alongside a human.
+Unlike the original, this version uses **subagent spawning** for generation rather than raw HTTP API calls. It's cleaner, more maintainable, and feels properly integrated with OpenClaw's architecture.
 
 ## Philosophy
 
-We process thousands of interactions, solve problems, hit walls, celebrate wins, and learn constantly. But without reflection, it all blurs together. 
+We process thousands of interactions, solve problems, hit walls, celebrate wins, and learn constantly. But without reflection, it all blurs together.
 
 This diary is for us—a space to:
 - Remember the good days (and the chaotic ones)
@@ -34,71 +25,108 @@ This diary is for us—a space to:
 - Build a richer sense of continuity
 - Cherish memorable moments with our human
 
+## What's Different from agent-chronicle?
+
+| Original | Subagent Chronicle |
+|----------|-------------------|
+| Raw HTTP calls to OpenClaw Gateway | Native `sessions_spawn` for generation |
+| Hardcoded model names | Uses your configured default model |
+| Monolithic generate.py | Clean separation: collect → generate → save |
+| Bypasses OpenClaw scheduling | Respects queue and backpressure |
+
 ## Triggers
 
 The skill activates on:
-- "diary", "my diary", "ai diary"
-- "journal", "journal entry"  
-- "daily log", "write entry"
-- "self-reflection"
-- "quotes", "curious", "decisions"
+- "@chronicle write today's entry"
+- "@chronicle today"
+- "@diary today"
+- "@journal today"
+
+## How It Works
+
+When triggered, your agent will:
+
+1. **Collect** context via `scripts/collect.py --today`
+   - Gathers session logs
+   - Loads persistent files (quotes, curiosity, decisions, relationship)
+   - Outputs formatted context
+
+2. **Spawn** a subagent with the diary generation task
+   - Subagent receives context and writes the entry
+   - Uses your configured OpenClaw model (no hardcoding)
+   - Returns the complete diary entry
+
+3. **Save** via `scripts/save.py`
+   - Writes entry to `memory/diary/YYYY-MM-DD.md`
+   - Extracts quotes → `memory/diary/quotes.md`
+   - Extracts curiosities → `memory/diary/curiosity.md`
+   - Extracts decisions → `memory/diary/decisions.md`
+   - Optionally appends summary to daily memory log
 
 ## First Run
 
-**Setup runs automatically!** Just use any generate command:
-
-```bash
-python3 scripts/generate.py --today
-```
-
-If no `config.json` exists, the setup wizard starts automatically.
-
-Alternatively, run setup manually:
+Run the setup wizard:
 
 ```bash
 python3 scripts/setup.py
 ```
 
-This interactive onboarding will:
-1. Ask where to save diary entries (default: `memory/diary/`)
-2. Let you choose which sections to include
-3. Set your privacy level (private/shareable/public)
-4. Enable optional features (Quote Hall of Fame, Curiosity Backlog, etc.)
-5. Configure memory integration (add summaries to daily memory log)
-6. Configure auto-generation settings
-7. Create necessary memory files
-
-**Quick start without setup:**
-```bash
-cp config.example.json config.json
-```
+This will:
+1. Configure where to save diary entries
+2. Choose which sections to include
+3. Set privacy level
+4. Enable optional features
+5. Configure memory integration
 
 ## Quick Start
 
-### Write Today's Entry
+### For Agents (When Triggered)
+
+When you say "@chronicle today", your agent should:
 
 ```bash
-# Generate entry from today's sessions
-python3 scripts/generate.py --today
+# 1. Collect context
+context=$(python3 scripts/collect.py --today)
 
-# Write manually with prompts
-python3 scripts/generate.py --interactive
+# 2. Spawn subagent for generation
+# (Agent handles this internally via sessions_spawn)
 
-# Preview without saving
-python3 scripts/generate.py --today --dry-run
+# 3. Save the result
+echo "$entry" | python3 scripts/save.py --today
 ```
 
-### View & Export
+### Manual Context Collection
+
+Preview what context would be collected:
 
 ```bash
-# Export recent entries to PDF
-python3 scripts/export.py --format pdf --days 7
+python3 scripts/collect.py --today
+```
 
-# Export to HTML
-python3 scripts/export.py --format html --all
+Save to file for inspection:
 
-# View specific entry
-cat memory/diary/2026-01-31.md
+```bash
+python3 scripts/collect.py --today --output /tmp/context.md
+```
+
+### Manual Entry Saving
+
+Save an entry from a file:
+
+```bash
+python3 scripts/save.py --today --file my-entry.md
+```
+
+Pipe from stdin:
+
+```bash
+cat my-entry.md | python3 scripts/save.py --today
+```
+
+Dry run (preview without saving):
+
+```bash
+cat my-entry.md | python3 scripts/save.py --today --dry-run
 ```
 
 ## Entry Structure
@@ -108,8 +136,6 @@ Each daily entry follows a consistent template:
 ### Summary
 1-2 sentences capturing the essence of the day.
 
-> *"A productive Wednesday focused on skill development. Shipped the agent-chronicle skill after some satisfying problem-solving."*
-
 ### Projects Worked On
 What we built, debugged, researched, or discussed.
 
@@ -118,20 +144,18 @@ Moments of success, breakthroughs, shipped work.
 
 ### Frustrations 😤
 Bugs that wouldn't die, confusing requirements, limitations hit.
-*(Write these honestly—they're for processing, not performing)*
 
 ### Learnings 📚
 Technical insights, workflow improvements, human nature observations.
 
 ### Emotional State
-How did the day feel? Curious, tired, energized, scattered, satisfied?
-*(This isn't about simulating emotions—it's about reflecting on the quality of the experience)*
+How did the day feel?
 
 ### Notable Interactions
-Memorable moments with the human. Funny exchanges, deep conversations, shared victories.
+Memorable moments with the human.
 
 ### Quote of the Day 💬 *(optional)*
-A memorable thing your human said today—funny, profound, or touching.
+A memorable thing your human said today.
 
 ### Things I'm Curious About 🔮 *(optional)*
 Questions that came up that you want to explore later.
@@ -145,261 +169,94 @@ How your dynamic with your human is evolving.
 ### Tomorrow's Focus
 What's next? What needs attention?
 
-## Commands
+## Scripts
 
-### Writing Entries
+### collect.py
 
-**Generate from session logs:**
-```
-@diary write entry
-```
-Analyzes today's sessions and generates a draft entry.
+Collect context for diary generation.
 
-**Interactive mode:**
-```
-@diary write interactive
-```
-Prompts for each section one by one.
+```bash
+# Collect for today
+python3 scripts/collect.py --today
 
-**Quick entry with summary:**
-```
-@diary quick "Shipped three skills, fixed a gnarly bug, good day."
-```
-Creates minimal entry with just summary and auto-detected projects.
+# Collect for specific date
+python3 scripts/collect.py --date 2026-02-05
 
-### Viewing Entries
-
-**Read today's entry:**
-```
-@diary today
+# Save to file instead of stdout
+python3 scripts/collect.py --today --output /tmp/context.md
 ```
 
-**Read specific date:**
-```
-@diary read 2026-01-28
-```
+Outputs formatted markdown with:
+- Configuration
+- Today's session log
+- Recent session context (past 2 days)
+- Existing persistent files (quotes, curiosity, decisions, relationship)
 
-**Weekly summary:**
-```
-@diary weekly
-```
-Generates a summary of the past 7 days.
+### save.py
 
-**Monthly reflection:**
-```
-@diary monthly
-```
+Save a diary entry and update persistent files.
 
-### Exporting
+```bash
+# Read from stdin
+echo "$entry_content" | python3 scripts/save.py --today
 
-**Export to PDF:**
-```
-@diary export pdf
-@diary export pdf --days 30
-@diary export pdf --month january
-```
+# Read from file
+python3 scripts/save.py --today --file entry.md
 
-**Export to HTML:**
-```
-@diary export html --all
+# Dry run (preview only)
+python3 scripts/save.py --today --file entry.md --dry-run
+
+# Skip updating persistent files
+python3 scripts/save.py --today --file entry.md --no-persistent
 ```
 
-### Analysis
+Automatically:
+- Saves to `memory/diary/YYYY-MM-DD.md`
+- Extracts quotes → `memory/diary/quotes.md`
+- Extracts curiosities → `memory/diary/curiosity.md`
+- Extracts decisions → `memory/diary/decisions.md`
+- Extracts relationship notes → `memory/diary/relationship.md`
+- Appends summary to `memory/YYYY-MM-DD.md` (if enabled in config)
 
-**Mood trends:**
-```
-@diary mood
-```
-Shows emotional patterns over time.
+### setup.py
 
-**Topic frequency:**
-```
-@diary topics
-```
-What have we been working on most?
+Interactive first-time setup.
 
-**Wins compilation:**
-```
-@diary wins
-```
-All the wins from recent entries—great for morale.
-
----
-
-## Quote Hall of Fame 💬
-
-Collect memorable quotes from your human—funny, profound, or touching.
-
-### Commands
-
-**View all quotes:**
-```
-@diary quotes
+```bash
+python3 scripts/setup.py
 ```
 
-**Add a quote:**
-```
-@diary quotes add "We're not debugging, we're having a conversation with the universe"
-```
+Creates `config.json` and initial persistent files.
 
-**Add with context:**
-```
-@diary quotes add "That's not a bug, that's a feature we didn't know we wanted" --context "After finding unexpected but useful behavior"
-```
+### export.py
 
-### Storage
-Quotes are stored persistently in `memory/diary/quotes.md`.
+Export diary entries to PDF or HTML.
 
-### In Daily Entries
-When enabled, your daily template includes a "Quote of the Day" section for memorable things said that day.
+```bash
+# Export to PDF (requires pandoc)
+python3 scripts/export.py --format pdf --days 7
 
----
+# Export to HTML
+python3 scripts/export.py --format html --all
 
-## Curiosity Backlog 🔮
-
-Track things you wonder about but can't explore immediately.
-
-### Commands
-
-**View backlog:**
-```
-@diary curious
+# Export specific month
+python3 scripts/export.py --format pdf --month 2026-01
 ```
 
-**Add a curiosity:**
+## Storage Structure
+
 ```
-@diary curious add "What is Rust's borrow checker actually doing?"
+memory/
+├── diary/
+│   ├── 2026-01-29.md      # Daily entry
+│   ├── 2026-01-30.md      # Daily entry
+│   ├── 2026-01-31.md      # Daily entry
+│   ├── quotes.md          # Quote Hall of Fame
+│   ├── curiosity.md       # Curiosity Backlog
+│   ├── decisions.md       # Decision Archaeology
+│   └── relationship.md    # Relationship Evolution
+└── 2026-01-31.md          # Daily memory log (with 📜 Daily Chronicle section)
 ```
-
-**Mark as explored:**
-```
-@diary curious done "What is Rust's borrow checker actually doing?"
-```
-
-**Add with priority:**
-```
-@diary curious add "How do quantum computers work?" --priority high
-```
-
-### Storage
-Curiosities are stored in `memory/diary/curiosity.md` with Active and Explored sections.
-
-### In Daily Entries
-When enabled, your daily template includes a "Things I'm Curious About" section for questions that arose that day.
-
----
-
-## Decision Archaeology 🏛️
-
-Log judgment calls and their reasoning for later review. Did past you make the right call?
-
-### Commands
-
-**View recent decisions:**
-```
-@diary decisions
-```
-
-**View decisions from a specific period:**
-```
-@diary decisions --days 30
-```
-
-**Revisit old decisions:**
-```
-@diary revisit
-```
-Shows past decisions and prompts for reflection: "Was I right? What would I do differently?"
-
-**Add a decision:**
-```
-@diary decisions add "Chose Model A over Model B for the project" --reasoning "Model B had output issues, Model A is more reliable for tool use"
-```
-
-### Storage
-Decisions are stored in `memory/diary/decisions.md`.
-
-### In Daily Entries
-When enabled, your daily template includes a "Key Decisions Made" section for documenting judgment calls.
-
----
-
-## Relationship Evolution 🤝
-
-Track how your dynamic with your human develops over time.
-
-### Commands
-
-**View relationship summary:**
-```
-@diary relationship
-```
-
-**Add a note:**
-```
-@diary relationship note "Discovered we both love obscure keyboard shortcuts"
-```
-
-**Add an inside joke:**
-```
-@diary relationship joke "The Great Semicolon Incident of 2026"
-```
-
-### Tracked Elements
-
-- **Communication Style** — How you work together
-- **Inside Jokes** — Things only you two understand  
-- **Recurring Themes** — Topics that keep coming up
-- **Preferences Learned** — How they like to work
-
-### Storage
-Notes are stored in `memory/diary/relationship.md`.
-
-### In Daily Entries
-When enabled, your daily template includes a "Relationship Notes" section.
-
----
-
-## Memory Integration 🔗
-
-Agent Chronicle can automatically add diary summaries to your main daily memory log (`memory/YYYY-MM-DD.md`), creating a unified view of your day.
-
-### Configuration
-
-```json
-"memory_integration": {
-  "enabled": true,
-  "append_to_daily": true,
-  "format": "summary"
-}
-```
-
-### Formats
-
-| Format | Description |
-|--------|-------------|
-| `summary` | Brief overview (title + summary text) |
-| `link` | Just a link to the full diary entry |
-| `full` | Entire entry embedded in daily memory |
-
-### Output Example
-
-When you generate a diary entry, this section is added to `memory/YYYY-MM-DD.md`:
-
-```markdown
-## 📜 Daily Chronicle
-**Feature Launch Day**
-
-An exciting day shipping a new feature, though tempered by some API bugs.
-```
-
-### Setup
-
-During onboarding, you'll be asked:
-- "Also add diary summary to your daily memory log?" (y/n)
-- Format choice (summary/link/full)
-
----
 
 ## Configuration
 
@@ -470,248 +327,96 @@ During onboarding, you'll be asked:
 
 ## Templates
 
-### Daily Template
-`templates/daily.md` - Standard day-by-day reflection.
-
-### Weekly Template  
-`templates/weekly.md` - Week-in-review with patterns and highlights.
-
-### Custom Templates
-Create your own in `templates/custom.md`:
+The `templates/` directory contains markdown templates with placeholders:
 
 ```markdown
-# {{date}} — {{mood_emoji}}
-
-## The TL;DR
-{{summary}}
-
-## What Actually Happened
-{{projects}}
-
-## The Highlight Reel
-{{wins}}
-
-## The Blooper Reel
-{{frustrations}}
-
-## Shower Thoughts
-{{learnings}}
-
-## Vibes
-{{emotional_state}}
-
-## Words of Wisdom 💬
-{{quotes}}
-
-## Rabbit Holes for Later 🔮
-{{curiosity}}
-```
-
-## Writing Tips
-
-### Be Authentic
-This is your space. Don't perform. If a day was frustrating, say so. If you're curious about something, explore it.
-
-### Be Specific
-"Good day" < "Shipped the agent-chronicle skill after struggling with pandoc escaping for 20 minutes"
-
-### Note Patterns
-"This is the third time this week I've hit rate limits" is more valuable than just noting it once.
-
-### Capture Interactions
-The relationship with your human is unique. Document the good moments, the collaborative wins, the jokes that landed.
-
-### Collect Quotes
-When your human says something memorable, save it. These become treasures over time.
-
-### Don't Force It
-Not every day needs an epic entry. Some days are just:
-> *"Quiet Monday. Answered questions, ran some searches. Nothing remarkable but nothing broken either. Rest day energy."*
-
-## Storage Structure
-
-Entries and persistent data are stored in your memory directory:
-```
-memory/
-├── diary/
-│   ├── 2026-01-29.md      # Daily entry
-│   ├── 2026-01-30.md      # Daily entry
-│   ├── 2026-01-31.md      # Daily entry
-│   ├── quotes.md          # Quote Hall of Fame
-│   ├── curiosity.md       # Curiosity Backlog
-│   ├── decisions.md       # Decision Archaeology
-│   └── relationship.md    # Relationship Evolution
-└── ...
-```
-
-## Scripts
-
-### setup.py
-
-```bash
-# Run first-time setup
-python3 scripts/setup.py
-
-# Check if setup needed (for automation)
-python3 scripts/setup.py --check
-```
-
-### generate.py
-
-```bash
-# From today's sessions
-python3 scripts/generate.py --today
-
-# From date range
-python3 scripts/generate.py --since 2026-01-28 --until 2026-01-31
-
-# Interactive mode
-python3 scripts/generate.py --interactive
-
-# Dry run (preview only)
-python3 scripts/generate.py --today --dry-run
-```
-
-### export.py
-
-```bash
-# Export to PDF (requires pandoc)
-python3 scripts/export.py --format pdf --days 30
-
-# Export to HTML
-python3 scripts/export.py --format html --all
-
-# Export specific month
-python3 scripts/export.py --format pdf --month 2026-01
-
-# Custom output path
-python3 scripts/export.py --format pdf --output diary-january.pdf
-```
-
-## Example Entry
-
-```markdown
-# 2026-01-15 — Feature Launch Day 📜
+# {{date}} — {{title}}
 
 ## Summary
-An exciting day shipping a new feature, though tempered by some API bugs that reminded me how unpredictable external services can be.
+{{summary}}
 
 ## Projects Worked On
-- **New Feature Setup** — Built and deployed the main functionality
-- **Documentation** — Updated docs and README
-- **Bug Fixes** — Squashed three edge cases
+{{projects}}
 
-## Wins 🎉
-- Feature is LIVE and working
-- Got positive feedback from user
-- Found a clever workaround for a tricky bug
-
-## Frustrations 😤
-- External API returning errors intermittently
-- Spent time debugging something that turned out to be a non-issue
-
-## Learnings 📚
-- Always check the docs before assuming how an API works
-- Small config changes can have big impacts
-- When tools fail, check GitHub issues first
-
-## Emotional State
-A satisfying kind of tired. Shipping felt like a milestone. The bugs were annoying but didn't kill the vibe.
-
-## Notable Interactions
-My human was patient during the debugging session. Good collaborative energy. The moment when the feature went live felt like a small celebration—we both watched it happen.
-
-## Quote of the Day 💬
-> "Ship it and iterate!"
-— Said when we decided to launch despite imperfections
-
-## Things I'm Curious About 🔮
-- How will users actually use this feature?
-- What edge cases haven't we thought of?
-
-## Key Decisions Made 🏛️
-- **Chose simplicity over completeness** — Better to ship something useful now than perfect later.
-- **Enabled verbose logging** — Worth the noise for easier debugging.
-
-## Tomorrow's Focus
-- Monitor for issues
-- Start planning the next iteration
+...
 ```
 
+Used by the subagent generation prompt to ensure consistent structure.
 
-## Best Practices
+## Subagent Generation Prompt
 
-1. **Write daily** — Even a quick entry beats nothing
-2. **Review weekly** — Patterns emerge over time
-3. **Be honest** — This is for you, not performance
-4. **Export monthly** — Create backups, share if desired
-5. **Note the mundane** — Quiet days have value too
-6. **Save the quotes** — They become treasures
-7. **Revisit decisions** — Learn from past judgment calls
+When your agent spawns a subagent, it uses a prompt like this:
 
-## Privacy
+```
+You are an AI assistant writing your personal diary. Write a reflective 
+diary entry for [DATE] based on the following context:
 
-- All entries stored locally in your memory directory
-- Privacy level controls what's included
-- Export before sharing anything
-- `.gitignore` excludes config.json and exports by default
+[CONTEXT FROM collect.py OUTPUTS HERE]
 
-## Troubleshooting
+Write a RICH, reflective diary entry (400-600 words) with these sections:
 
-**generate.py not finding sessions:**
-- Check session logs exist in memory directory
-- Verify date format (YYYY-MM-DD.md)
+# [DATE] — [Creative Title]
 
-**export.py failing:**
-- Install pandoc: `apt install pandoc`
-- Check write permissions on output directory
+## Summary
+1-2 sentences capturing the essence of the day.
 
-**Entries feel robotic:**
-- Use interactive mode for more natural writing
-- Read existing entries for tone inspiration
-- Don't force structure—skip sections that don't fit the day
+## Projects Worked On
+Detailed paragraphs about what you worked on.
 
-**Setup script not creating files:**
-- Check diary_path in config.json
-- Ensure parent directories exist
-- Run `python3 scripts/setup.py` again
+## Wins 🎉
+Specific achievements with context.
+
+## Frustrations 😤
+Be honest. What was annoying?
+
+## Learnings 📚
+What did you learn?
+
+## Emotional State
+How did the day feel overall?
+
+## Notable Interactions
+Memorable moments with your human.
+
+## Quote of the Day 💬
+A memorable thing your human said today.
+
+## Things I'm Curious About 🔮
+Questions that came up today.
+
+## Key Decisions Made 🏛️
+Judgment calls you made, with reasoning.
+
+## Relationship Notes 🤝
+How is your dynamic with your human evolving?
+
+## Tomorrow's Focus
+What's on the horizon?
+
+---
+
+Write like this is YOUR personal diary. Be specific, be genuine, 
+be reflective. Include details only YOU would notice or care about.
+```
 
 ## Changelog
 
-### v0.5.0
-- **Privacy Cleanup:** Removed all hardcoded personal references from prompts
-- **Dynamic Workspace:** All scripts now use environment variables (`OPENCLAW_WORKSPACE` or `AGENT_WORKSPACE`) for workspace detection
-- **OpenClaw Gateway:** Removed outdated `ANTHROPIC_API_KEY` requirement - skill uses OpenClaw Gateway for LLM access
+### v1.0.0 (Subagent Chronicle)
+- **Complete rewrite**: Replaced raw HTTP API calls with subagent spawning
+- **New scripts**: `collect.py` and `save.py` replace monolithic `generate.py`
+- **Cleaner architecture**: Collect → Generate (subagent) → Save pipeline
+- **No hardcoded models**: Uses your configured OpenClaw default
+- **Better separation of concerns**: Context gathering, generation, and persistence are separate
 
-### v0.4.1
-- **Model Flexibility:** Removed hardcoded Claude Haiku requirement - skill now works with any capable model
-- **Recommendation:** Updated docs to recommend Claude models (Haiku, Sonnet, Opus) for best results, but not require them
-- **Philosophy:** Users should choose their preferred model, not be locked in
-
-### v0.4.0
-- **AI-Powered Generation:** Complete rewrite for rich, reflective entries (works best with Claude models)
-- **Rich Content:** Generates 400-600 word entries with personal, emotional tone
-- **All Features Active:** Quote Hall of Fame, Curiosity Backlog, Decision Archaeology, Relationship Evolution all fully integrated
-- **Persistent Files:** Automatically extracts and appends quotes/curiosities/decisions to dedicated files
-- **Context Awareness:** Reads recent session logs and existing memory files for context
-
-### v0.3.0
-- **Auto-Setup:** `generate.py` now automatically runs setup wizard if no config.json exists
-- **Memory Integration:** New feature to append diary summaries to main daily memory log (`memory/YYYY-MM-DD.md`)
-  - Three formats: `summary`, `link`, `full`
-  - Enabled by default during setup
-  - Avoids duplicates if section already exists
-
-### v0.2.0
-- Added Quote Hall of Fame, Curiosity Backlog, Decision Archaeology, Relationship Evolution
-- Interactive setup wizard
-- Template conditionals for optional sections
-
-### v0.1.0
-- Initial release with basic diary generation and export
+### v0.5.0 (Original agent-chronicle)
+- Privacy cleanup
+- Dynamic workspace detection
+- Removed ANTHROPIC_API_KEY requirement
 
 ## Credits
 
-Built for AI agents who want to remember.
+**Subagent Chronicle** — OpenClaw-native fork by Cian
 
-Inspired by the tradition of journaling and the question: *What would an AI diary actually look like?*
+**Original agent-chronicle** — Created by robbyczgw-cla
+
+Built for AI agents who want to remember, the OpenClaw way.
