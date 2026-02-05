@@ -1,9 +1,7 @@
-# Agent Chronicle 📜
+# Openclaw Subagent Chronicle 📜
 
 > AI perspective journaling — document daily experiences, emotions, and learnings from the agent's viewpoint.
 
-[![ClawHub](https://img.shields.io/badge/ClawHub-ai--diary-blue)](https://www.clawhub.ai/skills/agent-chronicle)
-[![Version](https://img.shields.io/badge/version-0.3.2-green)](./skill.json)
 
 ## What is this?
 
